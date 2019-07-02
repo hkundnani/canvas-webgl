@@ -3,6 +3,7 @@ const random = require("canvas-sketch-util/random");
 const palettes = require("nice-color-palettes");
 const eases = require("eases");
 const BezierEasing = require("bezier-easing");
+const glsl = require("glslify");
 // Ensure ThreeJS is in global scope for the 'examples/'
 global.THREE = require("three");
 
@@ -10,7 +11,7 @@ global.THREE = require("three");
 require("three/examples/js/controls/OrbitControls");
 
 const settings = {
-  dimension: [512, 512],
+  dimensions: [512, 512],
   fps: 24,
   duration: 4,
   // Make the loop animated
@@ -35,7 +36,27 @@ const sketch = ({ context }) => {
   // camera.position.set(2, 2, -4);
   // camera.lookAt(new THREE.Vector3());
   const camera = new THREE.OrthographicCamera();
+  const fragmentShader = `
+    varying vec2 vUv;
+    uniform vec3 color;
+    void main() {
+      gl_FragColor = vec4(vec3(color * vUv.x), 1.0);
+    }
+  `;
 
+  const vertexShader = glsl(`
+    varying vec2 vUv;
+    uniform float time;
+
+    #pragma glslify: noise = require('glsl-noise/simplex/4d');
+
+    void main() {
+      vUv = uv;
+      vec3 pos = position.xyz;
+      pos += normal * noise(vec4(pos, time));
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `);
   // Setup camera controller
   // const controls = new THREE.OrbitControls(camera, context.canvas);
   const colorCount = random.rangeFloor(1, 6);
@@ -43,11 +64,18 @@ const sketch = ({ context }) => {
   // Setup your scene
   const scene = new THREE.Scene();
   const box = new THREE.BoxGeometry(1, 1, 1);
+  const meshes = [];
   for (let i = 0; i < 40; i++) {
     const mesh = new THREE.Mesh(
       box,
-      new THREE.MeshStandardMaterial({
-        color: random.pick(palette)
+      new THREE.ShaderMaterial({
+        fragmentShader,
+        vertexShader,
+        // color: random.pick(palette),
+        uniforms: {
+          time: { value: 0 },
+          color: { value: new THREE.Color(random.pick(palette)) }
+        }
         // roughness: 0.75,
         // flatShading: true
       })
@@ -64,6 +92,7 @@ const sketch = ({ context }) => {
     );
     mesh.scale.multiplyScalar(0.5);
     scene.add(mesh);
+    meshes.push(mesh);
   }
 
   // Specify an ambient/unlit colour
@@ -104,11 +133,14 @@ const sketch = ({ context }) => {
       camera.updateProjectionMatrix();
     },
     // Update & render your scene here
-    render({ playhead }) {
+    render({ playhead, time }) {
       const t = Math.sin(playhead * Math.PI);
       scene.rotation.z = easeFn(t);
       // eases.expoInOut(t);
 
+      meshes.forEach(mesh => {
+        mesh.material.uniforms.time.value = time;
+      });
       // controls.update();
       renderer.render(scene, camera);
     },
